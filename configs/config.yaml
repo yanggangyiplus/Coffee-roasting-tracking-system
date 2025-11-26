@@ -1,0 +1,50 @@
+# 로스팅 추적 시스템 설정 파일
+
+# 센서 설정
+sensor:
+  time_window: 30  # RoR 계산을 위한 시간 윈도우 (초)
+  update_interval: 1  # 데이터 업데이트 간격 (초)
+
+# 온도 임계값 (섭씨)
+temperature_thresholds:
+  drying_start: 50
+  maillard_start: 150
+  first_crack_min: 190
+  first_crack_max: 205
+  second_crack_min: 220
+  second_crack_max: 240
+
+# RoR 임계값 (도/분)
+ror_thresholds:
+  first_crack_drop: 5
+  second_crack_drop: 3
+
+# 습도 임계값 (%)
+humidity_thresholds:
+  drying_high: 80
+  drying_low: 30
+
+# 목표 배전도별 온도 범위
+roast_level_temperatures:
+  light: [195, 205]
+  medium: [205, 215]
+  medium_dark: [215, 225]
+  dark: [225, 240]
+
+# 데이터베이스 설정
+database:
+  path: "data/processed/roasting_profiles.db"
+  backup_enabled: true
+  backup_interval_days: 7
+
+# 대시보드 설정
+dashboard:
+  refresh_interval: 1  # 대시보드 새로고침 간격 (초)
+  max_data_points: 1000  # 그래프에 표시할 최대 데이터 포인트 수
+
+# 알림 설정
+notifications:
+  enabled: true
+  target_reached_sound: true
+  stage_change_notification: true
+

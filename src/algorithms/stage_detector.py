@@ -4,7 +4,7 @@
 """
 
 import pandas as pd
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from datetime import datetime
 
 from src.utils.constants import (

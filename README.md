@@ -14,12 +14,13 @@
 
 | 항목 | 성과 |
 |:---:|:---:|
-| **로스팅 단계 감지** | 건조/갈변/1차 크랙/발열/2차 크랙 자동 감지 |
+| **로스팅 단계 감지** | 건조/갈변/1차 크랙/발열/2차 크랙 자동 감지 (규칙 기반 + ML) |
 | **RoR 계산** | Rate of Rise 실시간 계산 및 시각화 |
 | **배전도 예측** | 목표 배전도 도달 시간 예측 알고리즘 |
-| **대시보드** | Streamlit 기반 실시간 모니터링 UI |
+| **머신러닝 모델** | RandomForest/GradientBoosting 센서 데이터 분류 + ResNet18 CNN 이미지 분류 |
+| **대시보드** | Streamlit 기반 실시간 모니터링 UI (ML 모델 선택 옵션 포함) |
 | **프로파일 관리** | SQLite 기반 프로파일 저장 및 비교 분석 |
-| **구현 범위** | 센서 데이터 처리부터 예측까지 End-to-End 구현 |
+| **구현 범위** | 센서 데이터 처리부터 ML 기반 예측까지 End-to-End 구현 |
 
 ## 문제 정의 & 해결 목적
 
@@ -37,11 +38,12 @@
 - **실시간 센서 데이터 처리**: 원두 온도, 드럼 온도, 습도, 가열량 데이터 수집 및 처리
 - **환경 데이터 추적**: 주변 온도/습도(날씨 데이터) 추적 및 시각화
 - **RoR 자동 계산**: Rate of Rise (온도 상승률) 실시간 계산
-- **로스팅 단계 자동 감지**: 생원두, 건조, 갈변, 1차 크랙, 발열, 2차 크랙 단계 자동 감지 알고리즘
+- **로스팅 단계 자동 감지**: 생원두, 건조, 갈변, 1차 크랙, 발열, 2차 크랙 단계 자동 감지 (규칙 기반 + ML)
 - **배전도 감지**: 생원두, 약배전, 중배전, 중강배전, 강배전 상태 자동 감지
+- **머신러닝 모델**: RandomForest/GradientBoosting 센서 분류 + ResNet18 CNN 이미지 분류 (선택 가능)
 - **원두 색상 감지**: 온도 기반 원두 색상 자동 감지 및 표시
 - **목표 배전도 예측**: 약배전/중배전/중강배전/강배전 도달 시간 예측
-- **실시간 대시보드**: Streamlit 기반 모니터링 및 시각화
+- **실시간 대시보드**: Streamlit 기반 모니터링 및 시각화 (ML 모델 ON/OFF 옵션)
 - **프로파일 저장/관리**: SQLite 기반 프로파일 저장 및 비교 분석 기능
 - **데이터 다운로드**: 실시간 데이터를 CSV 형식으로 다운로드 가능
 
@@ -130,9 +132,10 @@
 |------|------|----------|
 | **언어** | Python 3.8+ | 데이터 처리 및 분석에 표준 언어 |
 | **데이터 처리** | Pandas, NumPy | 센서 데이터 처리 및 통계 분석 |
+| **머신러닝** | scikit-learn | RandomForest, GradientBoosting 기반 센서 데이터 분류 |
+| **딥러닝** | PyTorch, torchvision | ResNet18 CNN 기반 이미지 분류 |
 | **시각화** | Matplotlib, Plotly | 인터랙티브 차트 및 실시간 시각화 |
 | **대시보드** | Streamlit | 빠른 프로토타이핑 및 실시간 모니터링 UI 구축 |
-| **모델링** | scikit-learn | 회귀 모델 기반 예측 (선택적) |
 | **데이터베이스** | SQLite | 경량 프로파일 저장 및 관리 |
 
 ## 핵심 알고리즘 설명
@@ -281,9 +284,12 @@ bash scripts/run_dashboard.sh
 ```
 
 4. **사용 방법**
-   - 사이드바에서 프로파일 이름, 원두 종류, 목표 배전도 설정
+   - 사이드바에서 데이터 입력 모드 선택 (수동 입력 / 파일 업로드 / 실시간 센서)
+   - 머신러닝 모델 사용 여부 선택 (체크박스)
+     - 모델이 없는 경우: `python scripts/train_sensor_model.py` 실행하여 모델 학습
+   - 프로파일 이름, 원두 종류, 목표 배전도 설정
    - "로스팅 시작" 버튼 클릭
-   - 센서 데이터 입력 폼에 온도, 습도, 가열량 입력
+   - 센서 데이터 입력 폼에 온도, 습도, 가열량 입력 (수동 입력 모드)
    - "데이터 추가" 버튼으로 실시간 데이터 추가
    - 대시보드에서 실시간 그래프 및 단계 감지 확인
    - 목표 배전도 도달 시간 예측 확인
@@ -301,10 +307,16 @@ Coffee-roasting-tracking-system/
 │   ├── data/              # 데이터 처리 모듈
 │   │   ├── __init__.py
 │   │   ├── processor.py   # 센서 데이터 처리
-│   │   └── profile_manager.py  # 프로파일 저장/관리
+│   │   ├── profile_manager.py  # 프로파일 저장/관리
+│   │   ├── file_loader.py      # CSV/엑셀 파일 로더
+│   │   └── sensor_stream.py    # 실시간 센서 스트림 (모의/실제)
 │   ├── algorithms/        # 알고리즘 모듈
 │   │   ├── __init__.py
-│   │   └── stage_detector.py  # 로스팅 단계 감지
+│   │   └── stage_detector.py  # 로스팅 단계 감지 (규칙 기반 + ML)
+│   ├── models/            # 머신러닝 모델
+│   │   ├── __init__.py
+│   │   ├── sensor_classifier.py  # 센서 데이터 분류 (RF/GB)
+│   │   └── image_classifier.py   # 이미지 분류 (ResNet18 CNN)
 │   ├── prediction/        # 예측 모듈
 │   │   ├── __init__.py
 │   │   └── roast_predictor.py  # 배전도 도달 예측
@@ -316,9 +328,15 @@ Coffee-roasting-tracking-system/
 ├── data/                  # 데이터 디렉토리
 │   ├── raw/              # 원본 데이터
 │   └── processed/        # 처리된 데이터 (DB)
+├── models/               # 학습된 모델 저장
+│   ├── sensor_classifier/  # 센서 분류 모델
+│   └── image_classifier/   # 이미지 분류 모델
 ├── scripts/              # 실행 스크립트
 │   ├── generate_sample_data.py  # 샘플 데이터 생성
-│   └── run_dashboard.sh  # 대시보드 실행 스크립트
+│   ├── create_sample_csv.py     # 샘플 CSV 파일 생성
+│   ├── train_sensor_model.py    # 센서 데이터 모델 훈련
+│   ├── train_image_model.py     # 이미지 분류 모델 훈련
+│   └── run_dashboard.sh         # 대시보드 실행 스크립트
 ├── docs/                 # 문서
 ├── requirements.txt      # Python 의존성
 ├── LICENSE
@@ -368,6 +386,25 @@ Rate of Rise를 실시간으로 계산하여 로스팅 진행 상황을 정량�
 - 프로파일 비교 분석
 - 프로파일 삭제
 
+### 7. 머신러닝 기반 배전도 예측
+
+**센서 데이터 분류 모델** (`src/models/sensor_classifier.py`):
+- RandomForest 또는 GradientBoosting 모델 사용
+- 입력: 원두 온도, 드럼 온도, 습도, 가열량, RoR, 경과 시간
+- 출력: 생원두/약배전/중배전/중강배전/강배전 분류 + 신뢰도
+- 규칙 기반 방식보다 더 정확한 배전도 예측
+
+**이미지 분류 모델** (`src/models/image_classifier.py`):
+- ResNet18 기반 CNN 모델 (Transfer Learning)
+- 입력: 원두 이미지
+- 출력: Green/Light/Medium/Dark 분류 + 신뢰도
+- 시각적 특징을 활용한 배전도 판별
+
+**모델 학습**:
+- `scripts/train_sensor_model.py`: 센서 데이터 모델 훈련
+- `scripts/train_image_model.py`: 이미지 분류 모델 훈련
+- 학습된 모델은 `models/` 디렉토리에 저장
+
 ## 실험 결과 및 검증
 
 ### 알고리즘 검증
@@ -405,12 +442,22 @@ RoR 계산, 크랙 감지 룰, 배전도 도달 시간 예측 로직을 직접 �
 
 ## 향후 개선 사항
 
-- [ ] 실제 센서 하드웨어 연동 (Arduino/Raspberry Pi)
-- [ ] 머신러닝 기반 예측 모델 고도화 (LSTM, 시계열 예측)
-- [ ] 다중 프로파일 비교 분석 기능 강화
+### 이미 구현된 기능
+- [x] 머신러닝 기반 배전도 분류 (RandomForest, GradientBoosting)
+- [x] CNN 기반 이미지 분류 (ResNet18)
+- [x] 실시간 센서 스트림 (모의 센서 구현 완료)
+- [x] 파일 업로드 기능 (CSV, 엑셀)
+
+### 추가 개선 계획
+- [ ] 실제 센서 하드웨어 연동 (Arduino/Raspberry Pi, RealSensorStream 구현 확장)
+- [ ] 시계열 예측 모델 고도화 (LSTM, Transformer 기반 배전도 도달 시간 예측)
+- [ ] 다중 프로파일 비교 분석 기능 강화 (2개 이상 프로파일 동시 비교)
+- [ ] 모델 성능 개선 (더 많은 학습 데이터 확보, 하이퍼파라미터 튜닝)
 - [ ] 모바일 앱 연동
 - [ ] 클라우드 배포 (Streamlit Cloud, AWS 등)
-- [ ] 알림 기능 강화 (이메일, SMS 등)
+- [ ] 알림 기능 강화 (목표 배전도 도달 시 이메일, SMS, 알람 등)
+- [ ] 원두별 최적 프로파일 추천 시스템
+- [ ] 로스팅 품질 평가 및 피드백 시스템
 
 ## 라이선스
 

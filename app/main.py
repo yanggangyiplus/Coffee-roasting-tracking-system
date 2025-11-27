@@ -9,20 +9,44 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import sys
+import os
 import io
 from pathlib import Path
 
 # 프로젝트 루트 경로 추가
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+current_file = Path(__file__).resolve()
+project_root = current_file.parent.parent
+project_root_str = str(project_root)
 
-from src.data.processor import SensorDataProcessor
-from src.data.file_loader import FileLoader
-from src.data.sensor_stream import MockSensorStream, SensorStreamReader, RealSensorStream
-from src.algorithms.stage_detector import RoastingStageDetector
-from src.prediction.roast_predictor import RoastLevelPredictor
-from src.data.profile_manager import ProfileManager
-from src.utils.constants import RoastingStage, RoastLevel, BeanColor
+# 경로를 sys.path에 추가 (중복 방지)
+if project_root_str not in sys.path:
+    sys.path.insert(0, project_root_str)
+
+# 작업 디렉토리 변경
+try:
+    os.chdir(project_root_str)
+except:
+    pass
+
+# 모듈 import
+try:
+    from src.data.processor import SensorDataProcessor
+    from src.data.file_loader import FileLoader
+    from src.data.sensor_stream import MockSensorStream, SensorStreamReader, RealSensorStream
+    from src.algorithms.stage_detector import RoastingStageDetector
+    from src.prediction.roast_predictor import RoastLevelPredictor
+    from src.data.profile_manager import ProfileManager
+    from src.utils.constants import RoastingStage, RoastLevel, BeanColor
+except ImportError as e:
+    # Streamlit이 실행되기 전이므로 print 사용
+    print(f"경로 설정: {project_root_str}")
+    print(f"sys.path: {sys.path[:3]}")
+    print(f"Import 오류: {e}")
+    print("\n해결 방법:")
+    print("1. 프로젝트 루트에서 실행: cd /path/to/Coffee-roasting-tracking-system && streamlit run app/main.py")
+    print("2. 또는 실행 스크립트 사용: bash scripts/run_dashboard.sh")
+    print("3. 또는 패키지 설치: pip install -e .")
+    raise
 
 # 머신러닝 모델 (선택적)
 try:
@@ -615,81 +639,230 @@ def show_profile_management(profile_manager: ProfileManager):
     )
     
     if len(profiles_df) > 0:
-        st.dataframe(profiles_df, use_container_width=True)
+        # 탭으로 구분: 목록/상세보기, 비교 분석
+        tab1, tab2 = st.tabs(["📋 프로파일 목록", "📊 프로파일 비교"])
         
-        # 프로파일 상세 보기
-        selected_id = st.selectbox(
-            "프로파일 선택",
-            options=profiles_df["id"].tolist(),
-            format_func=lambda x: f"ID {x}: {profiles_df[profiles_df['id']==x]['profile_name'].iloc[0]}"
-        )
-        
-        if selected_id:
-            profile = profile_manager.load_profile(selected_id)
+        with tab1:
+            st.dataframe(profiles_df, use_container_width=True)
             
-            if profile:
-                st.markdown("### 프로파일 상세")
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("총 시간", f"{profile['metadata']['total_time_seconds']/60:.1f}분")
-                with col2:
-                    st.metric("최종 온도", f"{profile['metadata']['final_temp']:.1f}°C")
-                with col3:
-                    st.metric("목표 배전도", profile['metadata']['target_level'] or "N/A")
-                
-                # 그래프 표시
-                data_df = profile["data"]
-                
-                fig = make_subplots(
-                    rows=2, cols=1,
-                    subplot_titles=("온도 곡선", "RoR 곡선"),
-                    vertical_spacing=0.1
-                )
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=data_df["elapsed_time"] / 60,
-                        y=data_df["bean_temp"],
-                        name="원두 온도",
-                        line=dict(color="red")
-                    ),
-                    row=1, col=1
-                )
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=data_df["elapsed_time"] / 60,
-                        y=data_df["ror"],
-                        name="RoR",
-                        line=dict(color="blue")
-                    ),
-                    row=2, col=1
-                )
-                
-                fig.update_xaxes(title_text="시간 (분)", row=2, col=1)
-                fig.update_yaxes(title_text="온도 (°C)", row=1, col=1)
-                fig.update_yaxes(title_text="RoR (°C/분)", row=2, col=1)
-                fig.update_layout(height=600)
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # 데이터 다운로드
-                csv = data_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 프로파일 데이터 다운로드 (CSV)",
-                    data=csv,
-                    file_name=f"profile_{selected_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-                
-                # 삭제 버튼
-                if st.button("🗑️ 프로파일 삭제", type="secondary"):
-                    if profile_manager.delete_profile(selected_id):
-                        st.success("프로파일이 삭제되었습니다.")
-                        st.rerun()
+            # 프로파일 상세 보기
+            selected_id = st.selectbox(
+                "프로파일 선택",
+                options=profiles_df["id"].tolist(),
+                format_func=lambda x: f"ID {x}: {profiles_df[profiles_df['id']==x]['profile_name'].iloc[0]}"
+            )
+            
+            if selected_id:
+                show_profile_detail(profile_manager, selected_id, profiles_df)
+        
+        with tab2:
+            show_profile_comparison(profile_manager, profiles_df)
+        
     else:
         st.info("저장된 프로파일이 없습니다.")
+
+
+def show_profile_detail(profile_manager: ProfileManager, selected_id: int, profiles_df: pd.DataFrame):
+    """프로파일 상세 보기"""
+    profile = profile_manager.load_profile(selected_id)
+    
+    if profile:
+        st.markdown("### 프로파일 상세")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("총 시간", f"{profile['metadata']['total_time_seconds']/60:.1f}분")
+        with col2:
+            st.metric("최종 온도", f"{profile['metadata']['final_temp']:.1f}°C")
+        with col3:
+            st.metric("목표 배전도", profile['metadata']['target_level'] or "N/A")
+        
+        # 통계 정보
+        stats = profile_manager.calculate_statistics(profile)
+        if stats:
+            st.markdown("#### 통계 정보")
+            stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+            with stat_col1:
+                st.metric("평균 온도", f"{stats['avg_temp']:.1f}°C")
+            with stat_col2:
+                st.metric("평균 RoR", f"{stats['avg_ror']:.2f}°C/분")
+            with stat_col3:
+                st.metric("최대 RoR", f"{stats['max_ror']:.2f}°C/분")
+            with stat_col4:
+                st.metric("온도 상승률", f"{stats['temp_rise_rate']:.2f}°C/분")
+        
+        # 그래프 표시
+        data_df = profile["data"]
+        
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=("온도 곡선", "RoR 곡선"),
+            vertical_spacing=0.1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=data_df["elapsed_time"] / 60,
+                y=data_df["bean_temp"],
+                name="원두 온도",
+                line=dict(color="red")
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=data_df["elapsed_time"] / 60,
+                y=data_df["ror"],
+                name="RoR",
+                line=dict(color="blue")
+            ),
+            row=2, col=1
+        )
+        
+        fig.update_xaxes(title_text="시간 (분)", row=2, col=1)
+        fig.update_yaxes(title_text="온도 (°C)", row=1, col=1)
+        fig.update_yaxes(title_text="RoR (°C/분)", row=2, col=1)
+        fig.update_layout(height=600)
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 데이터 다운로드
+        csv = data_df.to_csv(index=False)
+        st.download_button(
+            label="📥 프로파일 데이터 다운로드 (CSV)",
+            data=csv,
+            file_name=f"profile_{selected_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+        
+        # 삭제 버튼
+        if st.button("🗑️ 프로파일 삭제", type="secondary"):
+            if profile_manager.delete_profile(selected_id):
+                st.success("프로파일이 삭제되었습니다.")
+                st.rerun()
+
+
+def show_profile_comparison(profile_manager: ProfileManager, profiles_df: pd.DataFrame):
+    """다중 프로파일 비교 분석 화면"""
+    st.markdown("### 프로파일 비교 분석")
+    
+    # 비교할 프로파일 선택 (다중 선택)
+    available_profiles = [
+        (row["id"], f"ID {row['id']}: {row['profile_name']} ({row.get('bean_type', 'N/A')})")
+        for _, row in profiles_df.iterrows()
+    ]
+    
+    selected_profile_ids = st.multiselect(
+        "비교할 프로파일 선택 (2개 이상)",
+        options=[pid for pid, _ in available_profiles],
+        format_func=lambda x: next(label for pid, label in available_profiles if pid == x),
+        help="최소 2개 이상의 프로파일을 선택하세요"
+    )
+    
+    if len(selected_profile_ids) >= 2:
+        # 프로파일 비교 실행
+        comparison = profile_manager.compare_profiles(selected_profile_ids)
+        
+        if "error" in comparison:
+            st.error(comparison["error"])
+        else:
+            # 통계 비교 테이블
+            st.markdown("#### 통계 비교")
+            stats_data = []
+            for i, (profile_info, stats) in enumerate(zip(comparison["profiles"], comparison["statistics"])):
+                stats_data.append({
+                    "프로파일": profile_info["name"],
+                    "원두 종류": profile_info["bean_type"] or "N/A",
+                    "목표 배전도": profile_info["target_level"] or "N/A",
+                    "총 시간 (분)": f"{profile_info['total_time']/60:.1f}",
+                    "최종 온도 (°C)": f"{profile_info['final_temp']:.1f}",
+                    "평균 온도 (°C)": f"{stats['avg_temp']:.1f}",
+                    "평균 RoR (°C/분)": f"{stats['avg_ror']:.2f}",
+                    "최대 RoR (°C/분)": f"{stats['max_ror']:.2f}",
+                    "온도 상승률 (°C/분)": f"{stats['temp_rise_rate']:.2f}",
+                })
+            
+            stats_df = pd.DataFrame(stats_data)
+            st.dataframe(stats_df, use_container_width=True)
+            
+            # 유사도 행렬
+            st.markdown("#### 프로파일 유사도 행렬")
+            similarity_df = pd.DataFrame(
+                comparison["similarity_matrix"],
+                index=[p["name"] for p in comparison["profiles"]],
+                columns=[p["name"] for p in comparison["profiles"]]
+            )
+            st.dataframe(similarity_df.style.format("{:.2%}"), use_container_width=True)
+            
+            # 온도 곡선 비교 그래프
+            st.markdown("#### 온도 곡선 비교")
+            fig_temp = go.Figure()
+            
+            colors = ["red", "blue", "green", "orange", "purple", "brown"]
+            for i, curve in enumerate(comparison["temperature_curves"]):
+                time_minutes = [t / 60.0 for t in curve["time"]]
+                fig_temp.add_trace(
+                    go.Scatter(
+                        x=time_minutes,
+                        y=curve["temp"],
+                        name=curve["name"],
+                        line=dict(color=colors[i % len(colors)], width=2)
+                    )
+                )
+            
+            fig_temp.update_layout(
+                title="온도 곡선 비교",
+                xaxis_title="시간 (분)",
+                yaxis_title="온도 (°C)",
+                height=500,
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_temp, use_container_width=True)
+            
+            # RoR 곡선 비교 그래프
+            st.markdown("#### RoR 곡선 비교")
+            fig_ror = go.Figure()
+            
+            for i, curve in enumerate(comparison["ror_curves"]):
+                time_minutes = [t / 60.0 for t in curve["time"]]
+                fig_ror.add_trace(
+                    go.Scatter(
+                        x=time_minutes,
+                        y=curve["ror"],
+                        name=curve["name"],
+                        line=dict(color=colors[i % len(colors)], width=2)
+                    )
+                )
+            
+            fig_ror.update_layout(
+                title="RoR 곡선 비교",
+                xaxis_title="시간 (분)",
+                yaxis_title="RoR (°C/분)",
+                height=500,
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_ror, use_container_width=True)
+            
+            # 유사도 히트맵
+            st.markdown("#### 유사도 히트맵")
+            fig_heatmap = go.Figure(data=go.Heatmap(
+                z=comparison["similarity_matrix"],
+                x=[p["name"] for p in comparison["profiles"]],
+                y=[p["name"] for p in comparison["profiles"]],
+                colorscale="RdYlGn",
+                text=[[f"{val:.2%}" for val in row] for row in comparison["similarity_matrix"]],
+                texttemplate="%{text}",
+                textfont={"size": 10},
+                colorbar=dict(title="유사도")
+            ))
+            fig_heatmap.update_layout(
+                title="프로파일 유사도 히트맵",
+                height=400
+            )
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+    else:
+        st.info("비교하려면 최소 2개 이상의 프로파일을 선택하세요.")
 
 
 if __name__ == "__main__":

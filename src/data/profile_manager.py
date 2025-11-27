@@ -5,11 +5,20 @@
 import pandas as pd
 import sqlite3
 import json
+import numpy as np
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
 from src.utils.constants import RoastLevel, RoastingStage
+
+# DTW 알고리즘 (scipy 사용)
+try:
+    from scipy.spatial.distance import euclidean
+    from scipy.interpolate import interp1d
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
 
 
 class ProfileManager:
@@ -240,9 +249,131 @@ class ProfileManager:
         
         return deleted
     
+    def calculate_similarity(self, profile1: Dict, profile2: Dict) -> Dict:
+        """
+        두 프로파일 간 유사도 계산 (DTW 기반)
+        
+        Args:
+            profile1: 첫 번째 프로파일 딕셔너리
+            profile2: 두 번째 프로파일 딕셔너리
+            
+        Returns:
+            유사도 정보 딕셔너리
+        """
+        data1 = profile1["data"]
+        data2 = profile2["data"]
+        
+        # 시간 정규화 (0-1 범위로)
+        time1 = data1["elapsed_time"].values
+        time2 = data2["elapsed_time"].values
+        
+        if len(time1) == 0 or len(time2) == 0:
+            return {"similarity": 0.0, "dtw_distance": float('inf')}
+        
+        # 정규화
+        time1_norm = time1 / time1.max() if time1.max() > 0 else time1
+        time2_norm = time2 / time2.max() if time2.max() > 0 else time2
+        
+        # 온도 곡선 정규화
+        temp1 = data1["bean_temp"].values
+        temp2 = data2["bean_temp"].values
+        
+        temp1_norm = (temp1 - temp1.min()) / (temp1.max() - temp1.min() + 1e-10)
+        temp2_norm = (temp2 - temp2.min()) / (temp2.max() - temp2.min() + 1e-10)
+        
+        # 동일한 시간 간격으로 보간
+        common_time = np.linspace(0, 1, max(len(time1), len(time2)))
+        
+        if SCIPY_AVAILABLE:
+            try:
+                f1 = interp1d(time1_norm, temp1_norm, kind='linear', fill_value='extrapolate')
+                f2 = interp1d(time2_norm, temp2_norm, kind='linear', fill_value='extrapolate')
+                
+                temp1_interp = f1(common_time)
+                temp2_interp = f2(common_time)
+                
+                # DTW 거리 계산 (간단한 버전)
+                dtw_distance = self._dtw_distance(temp1_interp, temp2_interp)
+                
+                # 유사도 (0-1 범위, 1이 가장 유사)
+                max_distance = np.sqrt(len(common_time)) * (temp1_interp.max() - temp1_interp.min())
+                similarity = 1.0 / (1.0 + dtw_distance / (max_distance + 1e-10))
+                
+            except Exception as e:
+                # 보간 실패 시 유클리드 거리 사용
+                dtw_distance = np.linalg.norm(temp1_norm[:len(temp2_norm)] - temp2_norm[:len(temp1_norm)])
+                similarity = 1.0 / (1.0 + dtw_distance)
+        else:
+            # scipy가 없으면 간단한 유클리드 거리
+            min_len = min(len(temp1_norm), len(temp2_norm))
+            dtw_distance = np.linalg.norm(temp1_norm[:min_len] - temp2_norm[:min_len])
+            similarity = 1.0 / (1.0 + dtw_distance)
+        
+        return {
+            "similarity": float(similarity),
+            "dtw_distance": float(dtw_distance),
+        }
+    
+    def _dtw_distance(self, x: np.ndarray, y: np.ndarray) -> float:
+        """
+        Dynamic Time Warping 거리 계산 (간단한 구현)
+        
+        Args:
+            x: 첫 번째 시계열
+            y: 두 번째 시계열
+            
+        Returns:
+            DTW 거리
+        """
+        n, m = len(x), len(y)
+        dtw_matrix = np.full((n + 1, m + 1), np.inf)
+        dtw_matrix[0, 0] = 0
+        
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                cost = abs(x[i-1] - y[j-1])
+                dtw_matrix[i, j] = cost + min(
+                    dtw_matrix[i-1, j],
+                    dtw_matrix[i, j-1],
+                    dtw_matrix[i-1, j-1]
+                )
+        
+        return dtw_matrix[n, m]
+    
+    def calculate_statistics(self, profile: Dict) -> Dict:
+        """
+        프로파일 통계 정보 계산
+        
+        Args:
+            profile: 프로파일 딕셔너리
+            
+        Returns:
+            통계 정보 딕셔너리
+        """
+        data = profile["data"]
+        
+        if len(data) == 0:
+            return {}
+        
+        stats = {
+            "total_time_minutes": data["elapsed_time"].max() / 60.0,
+            "initial_temp": data["bean_temp"].iloc[0],
+            "final_temp": data["bean_temp"].iloc[-1],
+            "max_temp": data["bean_temp"].max(),
+            "avg_temp": data["bean_temp"].mean(),
+            "avg_ror": data["ror"].mean(),
+            "max_ror": data["ror"].max(),
+            "min_ror": data["ror"].min(),
+            "avg_humidity": data["humidity"].mean() if "humidity" in data.columns else None,
+            "avg_heating_power": data["heating_power"].mean() if "heating_power" in data.columns else None,
+            "temp_rise_rate": (data["bean_temp"].iloc[-1] - data["bean_temp"].iloc[0]) / (data["elapsed_time"].max() / 60.0) if data["elapsed_time"].max() > 0 else 0,
+        }
+        
+        return stats
+    
     def compare_profiles(self, profile_ids: List[int]) -> Dict:
         """
-        여러 프로파일 비교
+        여러 프로파일 비교 (강화된 버전)
         
         Args:
             profile_ids: 비교할 프로파일 ID 리스트
@@ -263,21 +394,31 @@ class ProfileManager:
             "profiles": [],
             "temperature_curves": [],
             "ror_curves": [],
+            "statistics": [],
+            "similarity_matrix": [],
         }
         
+        # 프로파일 정보 수집
         for profile in profiles:
             metadata = profile["metadata"]
             data = profile["data"]
             
-            comparison["profiles"].append({
+            # 기본 정보
+            profile_info = {
                 "id": metadata["id"],
                 "name": metadata["profile_name"],
                 "bean_type": metadata["bean_type"],
                 "target_level": metadata["target_level"],
                 "total_time": metadata["total_time_seconds"],
                 "final_temp": metadata["final_temp"],
-            })
+            }
+            comparison["profiles"].append(profile_info)
             
+            # 통계 정보
+            stats = self.calculate_statistics(profile)
+            comparison["statistics"].append(stats)
+            
+            # 곡선 데이터
             comparison["temperature_curves"].append({
                 "name": metadata["profile_name"],
                 "time": data["elapsed_time"].tolist(),
@@ -289,6 +430,21 @@ class ProfileManager:
                 "time": data["elapsed_time"].tolist(),
                 "ror": data["ror"].tolist(),
             })
+        
+        # 유사도 행렬 계산
+        similarity_matrix = []
+        for i, profile1 in enumerate(profiles):
+            row = []
+            for j, profile2 in enumerate(profiles):
+                if i == j:
+                    similarity = 1.0
+                else:
+                    sim_info = self.calculate_similarity(profile1, profile2)
+                    similarity = sim_info["similarity"]
+                row.append(similarity)
+            similarity_matrix.append(row)
+        
+        comparison["similarity_matrix"] = similarity_matrix
         
         return comparison
 

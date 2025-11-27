@@ -220,13 +220,23 @@ pip install -r requirements.txt
 # 샘플 CSV 파일 생성 (선택사항)
 python scripts/create_sample_csv.py
 
-# 대시보드 실행
+# 대시보드 실행 (프로젝트 루트에서 실행해야 함)
+cd /Users/yanggangyi/Desktop/PORTFOLIO_PROJECT/Coffee-roasting-tracking-system
 streamlit run app/main.py
-# 또는
+
+# 또는 실행 스크립트 사용 (권장)
 bash scripts/run_dashboard.sh
+
+# 또는 패키지로 설치 후 실행
+pip install -e .
+streamlit run app/main.py
 ```
 
 브라우저에서 `http://localhost:8501` 접속
+
+**⚠️ 중요**: Streamlit을 실행할 때는 반드시 **프로젝트 루트 디렉토리**에서 실행해야 합니다. 그렇지 않으면 `ModuleNotFoundError: No module named 'src'` 오류가 발생할 수 있습니다.
+
+자세한 문제 해결 방법은 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)를 참조하세요.
 
 ### 데이터 입력 모드
 
